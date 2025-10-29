@@ -1,0 +1,716 @@
+{
+  "name": "1337x Film Search - Sanitized",
+  "nodes": [
+    {
+      "parameters": {
+        "updates": [
+          "message"
+        ],
+        "additionalFields": {}
+      },
+      "id": "[Redacted]",
+      "name": "Telegram Trigger",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1,
+      "position": [
+        -1664,
+        -960
+      ],
+      "webhookId": "83a2cb29-071e-47d4-911d-24213aba2ae3",
+      "credentials": {
+        "telegramApi": {
+          "id": "[Your Telegram Bot ID]",}",
+          "name": "PlexGrabberBot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "rawMessage",
+              "value": "={{ $json.message.text }}"
+            },
+            {
+              "name": "userId",
+              "value": "={{ $json.message.from.id }}"
+            },
+            {
+              "name": "username",
+              "value": "={{ $json.message.from.username || $json.message.from.first_name }}"
+            },
+            {
+              "name": "timestamp",
+              "value": "={{ $now.toISO() }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "b99c0667-5d3a-46c2-828f-d76e8b97436f",
+      "name": "Extract Raw Data",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 1,
+      "position": [
+        -1472,
+        -960
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/chat/completions",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "openAiApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"gpt-4o-mini\",\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": \"You are a movie title parser and corrector. Your job is to: 1. Fix any spelling mistakes in the movie title 2. Return the correct movie title with the year it was released in parentheses 3. Format: \\\"Movie Title (YEAR)\\\"\\n\\nExamples:\\n- Input: \\\"inceptoin\\\" → Output: \\\"Inception (2010)\\\"\\n- Input: \\\"the dark knight\\\" → Output: \\\"The Dark Knight (2008)\\\"\\n- Input: \\\"hocus pocus\\\" → Output: \\\"Hocus Pocus (1993)\\\"\\n\\nIMPORTANT: Only return the formatted title with year, nothing else.\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": \"{{ $json.rawMessage }}\"\n    }\n  ],\n  \"temperature\": 0.3,\n  \"max_tokens\": 50\n}",
+        "options": {}
+      },
+      "id": "[Your OpenAI API ID]",
+      "name": "ChatGPT API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1264,
+        -960
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "[Your OpenAI API ID]",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "correctedTitle",
+              "value": "={{ $json.choices[0].message.content }}"
+            },
+            {
+              "name": "searchQuery",
+              "value": "={{ $json.choices[0].message.content.toLowerCase().replace(/ /g, '+') }}"
+            },
+            {
+              "name": "searchUrl",
+              "value": "=https://1337x.to/search/{{ $json.choices[0].message.content.toLowerCase().replace(/ /g, '+') }}/1/"
+            },
+            {
+              "name": "rawMessage",
+              "value": "={{ $('Extract Raw Data').item.json.rawMessage }}"
+            },
+            {
+              "name": "userId",
+              "value": "={{ $('Extract Raw Data').item.json.userId }}"
+            },
+            {
+              "name": "username",
+              "value": "={{ $('Extract Raw Data').item.json.username }}"
+            },
+            {
+              "name": "timestamp",
+              "value": "={{ $('Extract Raw Data').item.json.timestamp }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "e4572d7a-e35e-4970-b0e7-88008311c16f",
+      "name": "Format Search Query",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 1,
+      "position": [
+        -1072,
+        -960
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://http://your-service-ip:port:8191/v1",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"cmd\": \"request.get\",\n  \"url\": \"{{ $json.searchUrl }}\",\n  \"maxTimeout\": 60000\n}",
+        "options": {}
+      },
+      "id": "d00d3801-c734-4630-99c2-575829575548",
+      "name": "FlareSolverr Search",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1648,
+        -512
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $input.item.json;\nconst previousData = $('Format Search Query').item.json;\n\nif (!input.solution || !input.solution.response) {\n  return {\n    rawMessage: previousData.rawMessage,\n    correctedTitle: previousData.correctedTitle,\n    searchQuery: previousData.searchQuery,\n    timestamp: previousData.timestamp,\n    userId: previousData.userId,\n    username: previousData.username,\n    torrentPageUrl: null,\n    magnetLink: null,\n    torrentDownloadLink: null,\n    searchResultsFound: 0,\n    status: 'FlareSolverr Error'\n  };\n}\n\nconst html = input.solution.response;\nconst torrentLinkRegex = /href=\"(\\/torrent\\/\\d+\\/[^\"]+)\"/g;\nconst matches = [];\nlet match;\n\nwhile ((match = torrentLinkRegex.exec(html)) !== null) {\n  matches.push(match[1]);\n}\n\nconst firstTorrentPath = matches[0] || null;\nlet torrentPageUrl = null;\n\nif (firstTorrentPath) {\n  torrentPageUrl = 'https://1337x.to' + firstTorrentPath;\n}\n\nreturn {\n  rawMessage: previousData.rawMessage,\n  correctedTitle: previousData.correctedTitle,\n  searchQuery: previousData.searchQuery,\n  timestamp: previousData.timestamp,\n  userId: previousData.userId,\n  username: previousData.username,\n  torrentPageUrl: torrentPageUrl,\n  magnetLink: null,\n  torrentDownloadLink: null,\n  searchResultsFound: matches.length,\n  status: firstTorrentPath ? 'Found' : 'Not Found'\n};"
+      },
+      "id": "f5b1917c-930f-4c0d-a8e7-4488397fc5f2",
+      "name": "Parse HTML",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1472,
+        -512
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.torrentPageUrl }}",
+              "operation": "isNotEmpty"
+            }
+          ]
+        }
+      },
+      "id": "0cc45fa7-e4e8-4f0b-8472-3de8be5ea83d",
+      "name": "Check If Found",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        -1296,
+        -528
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://http://your-service-ip:port/v1",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"cmd\": \"request.get\",\n  \"url\": \"{{ $json.torrentPageUrl }}\",\n  \"maxTimeout\": 60000\n}",
+        "options": {}
+      },
+      "id": "f3906690-d99c-4114-9786-21638f91b930",
+      "name": "FlareSolverr Detail",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1104,
+        -512
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $input.item.json;\nconst previousData = $('Parse HTML').item.json;\n\nif (!input.solution || !input.solution.response) {\n  return {\n    rawMessage: previousData.rawMessage,\n    correctedTitle: previousData.correctedTitle,\n    searchQuery: previousData.searchQuery,\n    timestamp: previousData.timestamp,\n    userId: previousData.userId,\n    username: previousData.username,\n    torrentPageUrl: previousData.torrentPageUrl,\n    magnetLink: null,\n    torrentDownloadLink: null,\n    status: 'FlareSolverr Error on Detail Page'\n  };\n}\n\nconst html = input.solution.response;\n\nconst magnetRegex = /href=\"(magnet:\\?xt=urn:btih:[^\"]+)\"/;\nconst magnetMatch = html.match(magnetRegex);\nconst magnetLink = magnetMatch ? magnetMatch[1] : null;\n\nconst torrentRegex = /href=\"(\\/torrent\\/[^\"]+\\.torrent[^\"]*)\"/;\nconst torrentMatch = html.match(torrentRegex);\nlet torrentLink = torrentMatch ? 'https://1337x.to' + torrentMatch[1] : null;\n\nif (!torrentLink) {\n  const downloadRegex = /href=\"([^\"]*\\.torrent[^\"]*)\"/;\n  const downloadMatch = html.match(downloadRegex);\n  if (downloadMatch && downloadMatch[1].startsWith('http')) {\n    torrentLink = downloadMatch[1];\n  }\n}\n\nreturn {\n  rawMessage: previousData.rawMessage,\n  correctedTitle: previousData.correctedTitle,\n  searchQuery: previousData.searchQuery,\n  timestamp: previousData.timestamp,\n  userId: previousData.userId,\n  username: previousData.username,\n  torrentPageUrl: previousData.torrentPageUrl,\n  magnetLink: magnetLink,\n  torrentDownloadLink: torrentLink,\n  status: magnetLink || torrentLink ? 'Success' : 'Found But No Links'\n};"
+      },
+      "id": "36aa0283-f49f-482f-8c3c-11f5c92d8b72",
+      "name": "Extract Links",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -912,
+        -512
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "189Jg1RTLpFEe302CTueiw2Vzk-hdEebP3BsTiZ-Fqt0",
+          "mode": "list",
+          "cachedResultName": "Movie's To Get",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/189Jg1RTLpFEe302CTueiw2Vzk-hdEebP3BsTiZ-Fqt0/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Sheet1",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/189Jg1RTLpFEe302CTueiw2Vzk-hdEebP3BsTiZ-Fqt0/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [
+            "timestamp"
+          ],
+          "schema": [
+            {
+              "id": "rawMessage",
+              "displayName": "rawMessage",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "correctedTitle",
+              "displayName": "correctedTitle",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "searchQuery",
+              "displayName": "searchQuery",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "timestamp",
+              "displayName": "timestamp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "userId",
+              "displayName": "userId",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "username",
+              "displayName": "username",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "torrentPageUrl",
+              "displayName": "torrentPageUrl",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "magnetLink",
+              "displayName": "magnetLink",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "torrentDownloadLink",
+              "displayName": "torrentDownloadLink",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "a94d6c9e-70e8-4763-8b6a-44b1076fbdd9",
+      "name": "Save to Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [
+        -1472,
+        -16
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "[Your Google API ID]",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "rawMessage",
+              "value": "={{ $('Format Search Query').item.json.rawMessage }}"
+            },
+            {
+              "name": "correctedTitle",
+              "value": "={{ $('Format Search Query').item.json.correctedTitle }}"
+            },
+            {
+              "name": "timestamp",
+              "value": "={{ $('Format Search Query').item.json.timestamp }}"
+            },
+            {
+              "name": "userId",
+              "value": "={{ $('Format Search Query').item.json.userId }}"
+            },
+            {
+              "name": "username",
+              "value": "={{ $('Format Search Query').item.json.username }}"
+            },
+            {
+              "name": "status",
+              "value": "Not Found"
+            },
+            {
+              "name": "torrentPageUrl"
+            },
+            {
+              "name": "magnetLink"
+            },
+            {
+              "name": "torrentDownloadLink"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "16016f05-2c33-426c-9ad3-9535cfca74ba",
+      "name": "No Results",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 1,
+      "position": [
+        -1296,
+        -720
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://http://your-service-ip:port",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "urls",
+              "value": "={{ $json.magnetLink }}"
+            },
+            {
+              "name": "paused",
+              "value": "false"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1632,
+        -16
+      ],
+      "id": "f1b0d9a2-18ba-47ae-bb6f-4b2a7d675d2f",
+      "name": "send to qBittorrent",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "[Your Torrent ID]",
+          "name": "qBittorrent Cred"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Input and Title Correction\n- This section handles the user \ninput from Telegram and converts \nit into a clean movie search query.\n\n- Telegram Trigger receives a \nmessage (e.g., “inceptoin”) from the user.\n\n- Extract Raw Data captures key metadata — \nmessage text, user ID, username, and timestamp.\n\n- ChatGPT API is called with the raw text;\n GPT corrects and formats the \nmovie title into \"Movie Title (YEAR)\".\n\n-   Format Search Query builds the search \nURL for 1337x based on that corrected title\n and prepares data for the next step.\n\n✅ Purpose: Turn any messy or misspelled movie \ntitle into a standardized search-ready query.",
+        "height": 448,
+        "width": 384,
+        "color": 3
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -2096,
+        -1200
+      ],
+      "typeVersion": 1,
+      "id": "972643cf-4b26-435f-9452-a98ac0fa07fe",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "content": "🟨 Section 2: Search & Data Extraction\n\nThis section performs the search on 1337x and scrapes results to find the right torrent page.\n\n- FlareSolverr Search sends the search request through a headless browser to bypass Cloudflare.\n\n- Parse HTML extracts torrent result links from the returned HTML using regex.\n\n- Check If Found determines whether any results were found.\n\n- If no results, it routes to No Results, which logs the failed search.\n\n- If results exist, it triggers FlareSolverr Detail to open the first result page.\n\n- Extract Links scrapes magnet and .torrent links from the torrent’s detail page and marks the status as success or failed link extraction.\n\n✅ Purpose: Find and extract valid torrent and magnet links automatically.",
+        "height": 528,
+        "width": 384,
+        "color": 3
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -2096,
+        -704
+      ],
+      "typeVersion": 1,
+      "id": "b98430f0-b385-4793-8a1b-51eba2129285",
+      "name": "Sticky Note1"
+    },
+    {
+      "parameters": {
+        "content": "🟦 Section 3: Download & Logging\n\n- This section manages downloading and recordkeeping once a valid link is found.\n\n- Send to qBittorrent posts the magnet link directly to your local qBittorrent API, starting the download automatically.\n\n- Save to Sheets logs every transaction (successful or not) in a connected Google Sheet — including movie title, timestamp, user info, link data, and status.\n\n✅ Purpose: Automatically download found torrents and maintain a full activity log for tracking and debugging.",
+        "height": 368,
+        "width": 384,
+        "color": 3
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -2096,
+        -128
+      ],
+      "typeVersion": 1,
+      "id": "8b73195a-875f-4edb-a7d4-d99008447236",
+      "name": "Sticky Note2"
+    },
+    {
+      "parameters": {
+        "content": "",
+        "height": 224,
+        "width": 800,
+        "color": 3
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -1728,
+        -1024
+      ],
+      "typeVersion": 1,
+      "id": "79b889d5-4b74-4470-bdea-c35b5462c3bc",
+      "name": "Sticky Note3"
+    },
+    {
+      "parameters": {
+        "content": "",
+        "height": 272,
+        "width": 960,
+        "color": 3
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -1712,
+        -560
+      ],
+      "typeVersion": 1,
+      "id": "0d919070-d697-4403-9712-1f6ff554881d",
+      "name": "Sticky Note4"
+    },
+    {
+      "parameters": {
+        "content": "",
+        "height": 272,
+        "width": 192,
+        "color": 3
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -1344,
+        -736
+      ],
+      "typeVersion": 1,
+      "id": "36879a10-18eb-4b79-9bbb-f2b49568546d",
+      "name": "Sticky Note5"
+    },
+    {
+      "parameters": {
+        "content": "",
+        "height": 272,
+        "width": 432,
+        "color": 3
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -1712,
+        -80
+      ],
+      "typeVersion": 1,
+      "id": "93545bdd-da4c-4f55-ad67-9d347cbdbac7",
+      "name": "Sticky Note6"
+    },
+    {
+      "parameters": {
+        "content": "",
+        "height": 1648,
+        "width": 1872,
+        "color": 7
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -2384,
+        -1328
+      ],
+      "typeVersion": 1,
+      "id": "5346c87e-2af6-488f-9d46-eb961eef0e39",
+      "name": "Sticky Note7"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Telegram Trigger": {
+      "main": [
+        [
+          {
+            "node": "Extract Raw Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Raw Data": {
+      "main": [
+        [
+          {
+            "node": "ChatGPT API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ChatGPT API": {
+      "main": [
+        [
+          {
+            "node": "Format Search Query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Search Query": {
+      "main": [
+        [
+          {
+            "node": "FlareSolverr Search",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "FlareSolverr Search": {
+      "main": [
+        [
+          {
+            "node": "Parse HTML",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse HTML": {
+      "main": [
+        [
+          {
+            "node": "Check If Found",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check If Found": {
+      "main": [
+        [
+          {
+            "node": "FlareSolverr Detail",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "No Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "FlareSolverr Detail": {
+      "main": [
+        [
+          {
+            "node": "Extract Links",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Links": {
+      "main": [
+        [
+          {
+            "node": "send to qBittorrent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "No Results": {
+      "main": [
+        [
+          {
+            "node": "Save to Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "send to qBittorrent": {
+      "main": [
+        [
+          {
+            "node": "Save to Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "8f0f1016-dd58-40fe-a6ab-a12e0e074a43",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "[HASH_REDACTED]"
+  },
+  "id": "[Redacted Workflow ID]",
+  "tags": []
+}
